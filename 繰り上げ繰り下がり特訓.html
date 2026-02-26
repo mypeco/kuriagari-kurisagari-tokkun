@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>50もん とっくん！シールちょうつき</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: #F0F9FF;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-8px); }
+            75% { transform: translateX(8px); }
+        }
+        .shake { animation: shake 0.3s ease-in-out; }
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        /* スクロールバーのデザイン */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        // --- Constants ---
+        const STAMPS = ['💮', '🌟', '🌸', '🚗', '🍓', '🦄', '🎀', '💎', '🐶', '🌈', '🐻', '🐰', '🐱', '🐼', '🍩'];
+        const STORAGE_KEY = 'mika_sticker_book_2026';
+
+        // --- Audio Service ---
+        const audioService = {
+            ctx: null,
+            init() {
+                if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            playCorrect() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1046.50, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            },
+            playWrong() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            },
+            playCheer() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(554.37, this.ctx.currentTime + 0.1);
+                osc.frequency.setValueAtTime(659.25, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+        };
+
+        // --- Math Generators ---
+        const generateProblems = () => {
+            const problems = [];
+            
+            // 1. 10からの引き算 20問
+            for(let i=0; i<20; i++) {
+                const val = Math.floor(Math.random() * 9) + 1; // 1〜9
+                problems.push({ type: 'sub10', val1: 10, val2: val, answer: 10 - val });
+            }
+
+            // 2. 繰り上がり足し算・繰り下がり引き算 プール作成
+            const addPool = [];
+            for(let i=2; i<=9; i++) {
+                for(let j=2; j<=9; j++) {
+                    if(i+j >= 11 && i+j <= 18) {
+                        // 【変更】答えを10の位も含めた完全な数値にする
+                        addPool.push({ type: 'add', val1: i, val2: j, answer: i+j });
+                    }
+                }
+            }
+            
+            const subPool = [];
+            for(let a=11; a<=18; a++) {
+                for(let b=2; b<=9; b++) {
+                    if(a % 10 < b && a - b > 0) {
+                        subPool.push({ type: 'sub', val1: a, val2: b, answer: a-b });
+                    }
+                }
+            }
+
+            // ランダムに30問抽出
+            for(let i=0; i<30; i++) {
+                if(Math.random() > 0.5) {
+                    problems.push(addPool[Math.floor(Math.random() * addPool.length)]);
+                } else {
+                    problems.push(subPool[Math.floor(Math.random() * subPool.length)]);
+                }
+            }
+            return problems;
+        };
+
+        // --- Components ---
+        const Home = ({ onStart, onShowStickerBook, hintsEnabled, toggleHints }) => (
+            <div className="flex flex-col items-center justify-center min-h-[100svh] p-4 text-center">
+                <div className="bg-white p-8 rounded-[40px] shadow-2xl max-w-sm w-full border-4 border-sky-200">
+                    <div className="text-5xl mb-4">🔥</div>
+                    <h1 className="text-3xl font-black text-sky-600 mb-1 leading-tight">50もん とっくん！<br/>シールちょう</h1>
+                    <p className="font-bold text-gray-500 mb-6 mt-4 text-sm bg-gray-50 py-2 rounded-xl">
+                        10 - ◯ = ?<br/><span className="text-xs text-gray-400">▼</span><br/>たしざん・ひきざん
+                    </p>
+                    
+                    <div className="flex items-center justify-between mb-6 bg-orange-50 p-4 rounded-2xl w-full border border-orange-100">
+                        <span className="font-bold text-orange-600 text-sm">ヒント（さくらんぼ）</span>
+                        <button onClick={toggleHints} className={`w-14 h-7 rounded-full relative transition-colors duration-300 ${hintsEnabled ? 'bg-orange-400' : 'bg-gray-300'}`}>
+                            <div className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-300 ${hintsEnabled ? 'left-8' : 'left-1'}`}></div>
+                        </button>
+                    </div>
+
+                    <button onClick={onStart} className="w-full bg-orange-400 hover:bg-orange-500 text-white font-black py-4 rounded-2xl shadow-md text-xl mb-4 active:scale-95 transition">
+                        スタート！
+                    </button>
+
+                    <button onClick={onShowStickerBook} className="w-full bg-sky-50 hover:bg-sky-100 text-sky-600 font-bold py-3 rounded-2xl shadow-sm text-lg active:scale-95 transition flex items-center justify-center gap-2">
+                        <span>📖</span> シールちょう をみる
+                    </button>
+                </div>
+            </div>
+        );
+
+        const Game = ({ onFinish, onAbort, hintsEnabled }) => {
+            const [problems, setProblems] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [feedback, setFeedback] = useState(null);
+            const [showTransition, setShowTransition] = useState(false);
+            const [isAnimating, setIsAnimating] = useState(false);
+            const [inputVal, setInputVal] = useState(''); // 【追加】入力された文字を保持
+
+            useEffect(() => {
+                setProblems(generateProblems());
+            }, []);
+
+            const currentProblem = problems[currentIndex];
+
+            const handleAnswer = useCallback((numStr) => {
+                if (isAnimating || feedback !== null || !currentProblem) return;
+
+                const targetAnswerStr = String(currentProblem.answer);
+                const newVal = inputVal + numStr;
+                
+                setInputVal(newVal);
+
+                // 目標の桁数に達したら判定
+                if (newVal.length === targetAnswerStr.length) {
+                    setIsAnimating(true); // 即座にロックして連打防止
+                    
+                    if (newVal === targetAnswerStr) {
+                        audioService.playCorrect();
+                        setFeedback('correct');
+                        
+                        setTimeout(() => {
+                            setFeedback(null);
+                            setInputVal(''); // 次の問題のためにリセット
+                            
+                            // 20問目(インデックス19)をクリアした時のカットイン演出
+                            if (currentIndex === 19) {
+                                audioService.playCheer();
+                                setShowTransition(true);
+                                setTimeout(() => {
+                                    setShowTransition(false);
+                                    setCurrentIndex(20);
+                                    setIsAnimating(false);
+                                }, 2500);
+                            } else if (currentIndex + 1 < problems.length) {
+                                setCurrentIndex(prev => prev + 1);
+                                setIsAnimating(false);
+                            } else {
+                                // 50問クリア
+                                onFinish();
+                            }
+                        }, 500);
+                    } else {
+                        audioService.playWrong();
+                        setFeedback('wrong');
+                        setTimeout(() => {
+                            setFeedback(null);
+                            setInputVal(''); // 不正解時もリセットしてやり直し
+                            setIsAnimating(false);
+                        }, 500);
+                    }
+                }
+            }, [currentIndex, currentProblem, problems, isAnimating, feedback, inputVal, onFinish]);
+
+            if (problems.length === 0) return null;
+
+            if (showTransition) {
+                return (
+                    <div className="fixed inset-0 bg-sky-400 flex flex-col items-center justify-center z-50 text-white p-4 pop-in">
+                        <div className="text-7xl mb-4 animate-bounce">🚀</div>
+                        <h2 className="text-3xl md:text-4xl font-black text-center leading-tight mb-6">
+                            10 - ◯ = ?<br/>クリア！
+                        </h2>
+                        <div className="bg-white/20 p-6 rounded-2xl text-center backdrop-blur-sm border border-white/30">
+                            <p className="text-xl md:text-2xl font-bold">
+                                つぎは<br/>たしざん・ひきざん<br/>だよ！
+                            </p>
+                            <p className="mt-4 font-black text-yellow-300 text-2xl">がんばれ！</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            const renderProblem = () => {
+                const { type, val1, val2 } = currentProblem;
+                
+                if (type === 'sub10') {
+                    return (
+                        <div className="flex items-center justify-center gap-3 md:gap-6 w-full">
+                            <div className="text-6xl md:text-7xl font-black text-gray-700">10</div>
+                            <div className="text-4xl md:text-5xl font-black text-gray-400">-</div>
+                            <div className="text-6xl md:text-7xl font-black text-gray-700">{val2}</div>
+                            <div className="text-4xl md:text-5xl font-black text-gray-400">=</div>
+                            <div className={`w-16 h-16 md:w-20 md:h-20 border-4 border-dashed rounded-xl bg-orange-50 flex items-center justify-center text-4xl md:text-5xl font-black ${inputVal.length > 0 ? 'text-gray-700 border-solid border-orange-400' : 'text-orange-300 border-orange-300'}`}>
+                                {inputVal.length > 0 ? inputVal[0] : '?'}
+                            </div>
+                        </div>
+                    );
+                } else if (type === 'add') {
+                    const comp = 10 - val1;
+                    const rem = val2 - comp;
+                    return (
+                        <div className="flex items-center justify-center gap-2 md:gap-4 w-full">
+                            <div className="flex flex-col items-center relative">
+                                <div className="text-5xl md:text-6xl font-black text-gray-700">{val1}</div>
+                            </div>
+                            <div className="text-3xl md:text-4xl font-black text-gray-400">+</div>
+                            <div className="flex flex-col items-center relative">
+                                <div className="text-5xl md:text-6xl font-black text-gray-700">{val2}</div>
+                                {hintsEnabled && (
+                                    <div className="absolute -bottom-12 w-full flex justify-center">
+                                        <div className="flex gap-4 text-xl md:text-2xl font-black text-red-500 relative pt-3">
+                                            <svg className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-4 text-red-200" viewBox="0 0 40 20" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                                                <path d="M 20 0 L 5 15 M 20 0 L 35 15" />
+                                            </svg>
+                                            <span className="w-6 text-center z-10">{comp}</span>
+                                            <span className="w-6 text-center z-10">{rem}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="text-3xl md:text-4xl font-black text-gray-400">=</div>
+                            <div className="flex gap-1 md:gap-2">
+                                <div className={`w-12 h-14 md:w-16 md:h-16 border-4 border-dashed rounded-xl bg-sky-50 flex items-center justify-center text-4xl md:text-5xl font-black ${inputVal.length > 0 ? 'text-gray-700 border-solid border-sky-400' : 'text-sky-300 border-sky-300'}`}>
+                                    {inputVal.length > 0 ? inputVal[0] : '?'}
+                                </div>
+                                <div className={`w-12 h-14 md:w-16 md:h-16 border-4 border-dashed rounded-xl bg-sky-50 flex items-center justify-center text-4xl md:text-5xl font-black ${inputVal.length > 1 ? 'text-gray-700 border-solid border-sky-400' : 'text-sky-300 border-sky-300'}`}>
+                                    {inputVal.length > 1 ? inputVal[1] : '?'}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                } else if (type === 'sub') {
+                    const ones = val1 % 10;
+                    return (
+                        <div className="flex items-center justify-center gap-2 md:gap-4 w-full">
+                            <div className="flex flex-col items-center relative">
+                                <div className="text-5xl md:text-6xl font-black text-gray-700">
+                                    {val1}
+                                </div>
+                                {hintsEnabled && (
+                                    <div className="absolute -bottom-12 w-full flex justify-center">
+                                        <div className="flex gap-4 text-xl md:text-2xl font-black text-blue-500 relative pt-3">
+                                            <svg className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-4 text-blue-200" viewBox="0 0 40 20" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                                                <path d="M 20 0 L 5 15 M 20 0 L 35 15" />
+                                            </svg>
+                                            <span className="w-6 text-center z-10">10</span>
+                                            <span className="w-6 text-center z-10">{ones}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="text-3xl md:text-4xl font-black text-gray-400">-</div>
+                            <div className="flex flex-col items-center relative">
+                                <div className="text-5xl md:text-6xl font-black text-gray-700">{val2}</div>
+                            </div>
+                            <div className="text-3xl md:text-4xl font-black text-gray-400">=</div>
+                            <div className={`w-14 h-14 md:w-16 md:h-16 border-4 border-dashed rounded-xl bg-purple-50 flex items-center justify-center text-4xl md:text-5xl font-black ${inputVal.length > 0 ? 'text-gray-700 border-solid border-purple-400' : 'text-purple-300 border-purple-300'}`}>
+                                {inputVal.length > 0 ? inputVal[0] : '?'}
+                            </div>
+                        </div>
+                    );
+                }
+            };
+
+            const isMake10 = currentProblem.type === 'sub10';
+            const bgColorClass = isMake10 ? 'bg-orange-50' : 'bg-sky-50';
+            const progressColorClass = isMake10 ? 'bg-orange-400' : 'bg-sky-400';
+            const modeText = isMake10 ? '10から ひく' : 'たしざん・ひきざん';
+
+            return (
+                <div className={`flex flex-col min-h-[100svh] ${bgColorClass} transition-colors duration-500`}>
+                    <div className="p-3 flex justify-between items-center bg-white shadow-sm z-10">
+                        <button onClick={onAbort} className="text-gray-400 font-bold px-3 py-1 hover:bg-gray-100 rounded-lg transition text-sm">やめる</button>
+                        <div className="font-bold text-gray-600 text-sm">{modeText}</div>
+                        <div className="text-sm font-black text-gray-700">{currentIndex + 1} / 50</div>
+                    </div>
+                    
+                    <div className="w-full h-1.5 bg-gray-200">
+                        <div className={`h-full ${progressColorClass} transition-all duration-300`} style={{ width: `${((currentIndex + 1) / problems.length) * 100}%` }} />
+                    </div>
+
+                    <div className="flex-1 flex flex-col items-center justify-center p-4">
+                        <div className={`bg-white w-full max-w-lg py-12 px-4 rounded-[32px] shadow-xl border-4 relative transition-all duration-200 ${feedback === 'correct' ? 'border-green-400 scale-105' : feedback === 'wrong' ? 'border-red-400 shake' : 'border-white'}`}>
+                            {renderProblem()}
+                            {feedback && (
+                                <div className={`absolute inset-0 flex items-center justify-center pointer-events-none opacity-30 text-[10rem] font-black ${feedback === 'correct' ? 'text-green-500' : 'text-red-500'}`}>
+                                    {feedback === 'correct' ? '〇' : '×'}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="p-4 pb-[env(safe-area-inset-bottom)] bg-white rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+                        <div className="grid grid-cols-5 gap-2 max-w-md mx-auto mb-4">
+                            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map(numStr => (
+                                <button key={numStr} onClick={() => handleAnswer(numStr)} disabled={isAnimating || feedback !== null} className={`w-full aspect-square flex items-center justify-center text-3xl font-black rounded-2xl shadow-sm active:scale-90 transition border-b-4 ${isMake10 ? 'bg-orange-100 text-orange-600 border-orange-200 hover:bg-orange-200' : 'bg-sky-100 text-sky-600 border-sky-200 hover:bg-sky-200'}`}>
+                                    {numStr}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const StampSelect = ({ onSelect }) => (
+            <div className="flex flex-col items-center justify-center min-h-[100svh] p-4 bg-yellow-50 pop-in">
+                <div className="bg-white p-6 md:p-8 rounded-[40px] shadow-2xl max-w-md w-full border-4 border-yellow-300 text-center relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-300 via-transparent to-transparent"></div>
+                    
+                    <h2 className="text-3xl md:text-4xl font-black text-orange-500 mb-2 relative z-10">やったね！<br/>50もん クリア！</h2>
+                    <p className="text-gray-600 font-bold mb-8 relative z-10 text-sm">シールちょうにはる スタンプをえらんでね</p>
+                    
+                    <div className="grid grid-cols-5 gap-3 mb-4 relative z-10">
+                        {STAMPS.map(stamp => (
+                            <button key={stamp} onClick={() => onSelect(stamp)} className="aspect-square text-4xl md:text-5xl bg-gray-50 hover:bg-yellow-100 rounded-2xl flex items-center justify-center active:scale-90 transition border-2 border-transparent hover:border-yellow-400 shadow-sm">
+                                {stamp}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const StickerBook = ({ stickers, onBack }) => {
+            // カレンダー描画用ヘルパー (2026年の指定期間: 2/26 〜 3/31)
+            // 2月と3月を分けて描画します。
+            const renderMonth = (year, month, highlightStartDay = null) => {
+                const daysInMonth = new Date(year, month, 0).getDate();
+                const firstDay = new Date(year, month - 1, 1).getDay();
+                const blanks = Array.from({ length: firstDay }, (_, i) => null);
+                const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+                return (
+                    <div className="mb-8 bg-white p-4 rounded-3xl shadow-sm border border-sky-100" key={month}>
+                        <h3 className="text-lg font-black text-sky-600 text-center mb-3">{month}月</h3>
+                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-gray-400 mb-2">
+                            <div className="text-red-400">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div className="text-blue-400">土</div>
+                        </div>
+                        <div className="grid grid-cols-7 gap-1 md:gap-2">
+                            {blanks.map((_, i) => <div key={`blank-${i}`} className="aspect-square"></div>)}
+                            {days.map(d => {
+                                const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                const isTarget = highlightStartDay ? d >= highlightStartDay : true;
+                                const dayStickers = stickers[dateStr] || [];
+                                
+                                return (
+                                    <div key={d} className={`aspect-square rounded-xl border-2 ${isTarget ? 'bg-sky-50 border-sky-100' : 'bg-gray-50 border-transparent opacity-40'} relative flex flex-col items-center justify-center p-1 overflow-hidden`}>
+                                        <span className={`text-xs font-bold z-10 absolute top-1 left-1.5 ${isTarget ? 'text-sky-600' : 'text-gray-400'}`}>{d}</span>
+                                        <div className="flex-1 w-full h-full relative pointer-events-none mt-2">
+                                            {dayStickers.map((s, idx) => {
+                                                // 複数貼られた時に少しずつずらす計算
+                                                const offset = idx * 3;
+                                                const rot = (idx % 3 === 0 ? 1 : -1) * (10 + idx * 5);
+                                                return (
+                                                    <div key={idx} className="absolute text-2xl md:text-3xl drop-shadow-sm transition-transform" style={{
+                                                        top: `calc(50% + ${offset}px)`, 
+                                                        left: `calc(50% + ${idx%2===0 ? offset : -offset}px)`,
+                                                        transform: `translate(-50%, -50%) rotate(${rot}deg)`,
+                                                        zIndex: idx
+                                                    }}>
+                                                        {s}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-[100svh] bg-sky-50 flex flex-col">
+                    <div className="p-4 bg-white shadow-sm flex items-center justify-between sticky top-0 z-20">
+                        <button onClick={onBack} className="text-sky-600 font-bold px-4 py-2 hover:bg-sky-50 rounded-xl transition text-sm">← もどる</button>
+                        <h2 className="text-lg font-black text-gray-700">シールちょう</h2>
+                        <div className="w-20"></div>
+                    </div>
+                    
+                    <div className="flex-1 p-4 max-w-md w-full mx-auto pb-12">
+                        <div className="bg-orange-100 text-orange-600 font-bold text-xs text-center py-2 px-4 rounded-full mb-6 mx-auto w-fit">
+                            きかん：2/26 〜 3/31
+                        </div>
+                        
+                        {renderMonth(2026, 2, 26)}
+                        {renderMonth(2026, 3, 1)}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [screen, setScreen] = useState('HOME'); // HOME, GAME, STAMP, BOOK
+            const [stickers, setStickers] = useState({});
+            const [hintsEnabled, setHintsEnabled] = useState(true);
+
+            useEffect(() => {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) setStickers(JSON.parse(saved));
+            }, []);
+
+            const saveSticker = (stamp) => {
+                // ローカルタイムで今日の日付文字列(YYYY-MM-DD)を取得
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                const dateStr = `${yyyy}-${mm}-${dd}`;
+
+                const currentDayStickers = stickers[dateStr] || [];
+                const newStickers = { ...stickers, [dateStr]: [...currentDayStickers, stamp] };
+                
+                setStickers(newStickers);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(newStickers));
+                setScreen('BOOK');
+            };
+
+            return (
+                <div className="min-h-[100svh] w-full bg-sky-50 font-sans text-gray-800 overflow-x-hidden">
+                    {screen === 'HOME' && <Home onStart={() => setScreen('GAME')} onShowStickerBook={() => setScreen('BOOK')} hintsEnabled={hintsEnabled} toggleHints={() => setHintsEnabled(!hintsEnabled)} />}
+                    {screen === 'GAME' && <Game onFinish={() => setScreen('STAMP')} onAbort={() => setScreen('HOME')} hintsEnabled={hintsEnabled} />}
+                    {screen === 'STAMP' && <StampSelect onSelect={saveSticker} />}
+                    {screen === 'BOOK' && <StickerBook stickers={stickers} onBack={() => setScreen('HOME')} />}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
